@@ -1,31 +1,47 @@
 # This workflow will do a clean install of node dependencies, cache/restore them, build the source code and run tests across different versions of node
 # For more information see: https://help.github.com/actions/language-and-framework-guides/using-nodejs-with-github-actions
 
-name: Node.js CI
+name: Deploy Sandbox Vale
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'force-app/**'
   pull_request:
     branches: [ main ]
-
+    paths:
+      - 'force-app/**'
 jobs:
   build:
-
-    runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [12.x, 14.x, 16.x]
-        # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
-
+    runs-on: unbuntu-latest
     steps:
     - uses: actions/checkout@v2
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v2
       with:
-        node-version: ${{ matrix.node-version }}
-        cache: 'npm'
-    - run: npm ci
-    - run: npm run build --if-present
-    - run: npm test
+        ref: ${{ GitHub.ref }}
+        fetch-depth: 0
+      if: GetHub.event.action == 'opened' || GitHub.event.action == 'synchronize' || GitHub.event_name =='push'
+    - uses: actions/setup-node@v1
+      with:
+        node-version: '>=14'
+        check-latest: true
+        
+    - name: Install Salesforce ClI
+      run:
+        npm install sfdc-cli
+        node_modules/sfdx-cli/bin/run --version
+        node_modules/sfdz/cli/bin/run plugions --core
+        
+    - name: Populates auth file
+      shell: bash
+      run: 'echo ${{ secrets.SFDX_LR_TEST_URL }} > SFDX_QA'
+    
+    - name: 'Authenticate DevHub'
+      run: node_modules/sfdx/bin/run force:auth:sfdxurl:store -f SFDX_QA -s -a LRQA
+      
+    - name: Run Tests
+      run: node_modules/sfdx-cli/bin/run force:apex:test:run --resulformat tap --codecoverage - c -r human
+      
+    - name: Deploy
+      run: node_modules/sfdx-cli/bin/run force:source:deploy -p diffdeploy/force-app -u LRQA --json --loglevel fatal
+    
